@@ -5,6 +5,9 @@ if [ $# -lt 1 ];then
     exit 1
 fi
 
+command -v java >/dev/null 2>&1 || { echo >&2 "Require java but it's not installed.  Aborting."; exit 1; }
+command -v mvn >/dev/null 2>&1 || { echo >&2 "Require mvn but it's not installed.  Aborting."; exit 1; }
+
 DIR=$1
 
 BASE_DIR=$(cd `dirname $0`; pwd)
@@ -66,11 +69,22 @@ echo "Mqbroker start success."
 cd $DIR/redis-5.0.3/src && nohup ./redis-server > $DIR/redis-server.log 2>&1 &
 echo "Redis start success."
 
-echo "waiting for servers start..."
+echo "Waiting for servers start..."
+
+RESULT=`curl -s -X POST -d "dataId=user-center.yaml&group=DEFAULT_GROUP&content=user.id: chenzhu" http://127.0.0.1:8848/nacos/v1/cs/configs`
+TIMES=60
 
 sleep 10
 
-RESULT=`curl -s -X POST -d "dataId=user-center.yaml&group=DEFAULT_GROUP&content=user.id: chenzhu" http://127.0.0.1:8848/nacos/v1/cs/configs`
+while [ "$RESULT" != "true" ] && [ $TIMES -gt 0 ]
+do
+    RESULT=`curl -s -X POST -d "dataId=user-center.yaml&group=DEFAULT_GROUP&content=user.id: chenzhu" http://127.0.0.1:8848/nacos/v1/cs/configs`
+    let TIMES=TIMES-1
+    echo "Remain $TIMES seconds : Checking servers is started successfully."
+    sleep 1
+done
+
+echo "Servers has been started successfully."
 
 if [ "$RESULT" != "true" ];then
     echo "Create config failed."
@@ -86,6 +100,26 @@ echo "sca-user-center start success."
 cd $BASE_DIR/sca-best-practice/sca-order && nohup mvn spring-boot:run > $DIR/sca-order.log 2>&1 &
 echo "sca-order start success."
 
+echo "Waiting for applications start..."
+
+RESULT_R=`curl -I -m 10 -o /dev/null -s -w %{http_code} http://127.0.0.1:9999/user-center/example/testRedis`
+RESULT_S=`curl -I -m 10 -o /dev/null -s -w %{http_code} http://127.0.0.1:9999/order/example/testService`
+TIMES=60
+
 sleep 10
 
-echo "Servers and applications has been started successfully."
+while [ "$RESULT_R$RESULT_S" != "200200" ] && [ $TIMES -gt 0 ]
+do
+    RESULT_R=`curl -I -m 10 -o /dev/null -s -w %{http_code} http://127.0.0.1:9999/user-center/example/testRedis`
+    RESULT_S=`curl -I -m 10 -o /dev/null -s -w %{http_code} http://127.0.0.1:9999/order/example/testService`
+    let TIMES=TIMES-1
+    echo "Remain $TIMES seconds : Checking applications is started successfully."
+    sleep 1
+done
+
+if [ "$RESULT_R$RESULT_S" != "200200" ];then
+    echo "Applications has been started failed."
+    exit 1
+fi
+
+echo "Applications has been started successfully."
